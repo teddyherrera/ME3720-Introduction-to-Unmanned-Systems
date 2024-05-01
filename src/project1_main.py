@@ -30,8 +30,8 @@ aft_vert_thruster_pub = rospy.Publisher('/aft_vert_thruster', Float64, queue_siz
 # Global variables
 fusion_state_sub = np.array([])
 desired_rate = 4  # Hz
-kp_depth, ki_depth, kd_depth = 300.0, 10.0, 5.0
-kp_heading, ki_heading, kd_heading = 20.0, 1.0, 2.0
+kp_depth, ki_depth, kd_depth = 500.0, 300.0, 0.0
+kp_heading, ki_heading, kd_heading = 25.0, 5.0, 0.0
 
 
 # Initialize PID Controllers
@@ -76,7 +76,7 @@ heading_control_signal_data = np.empty((0,))
 
 # Main control loop
 current_count = 0
-total_duration = 300 * desired_rate  # duration in seconds multiplied by sampling ros rate
+total_duration = 300  # duration in seconds multiplied by sampling ros rate
 try:
     while current_count < total_duration:
         depth_control_signal, depth_error = depth_PID.update(current_depth, desired_depth, dt)
@@ -103,7 +103,8 @@ try:
         heading_control_signal_data = np.append(heading_control_signal_data, heading_control_signal)
 
         rate.sleep()
-        current_count += 1
+        current_count += dt
+        print('current_count: {}'.format(current_count))
 except rospy.ROSInterruptException:  # handles ROS shutdown requests Ctrl+C or rosnode kill etc.
     rospy.loginfo("ROS shutdown request received.")
 except Exception as e:  # handles and displays unexpected errors that aren't keyboard interrupts or system exits

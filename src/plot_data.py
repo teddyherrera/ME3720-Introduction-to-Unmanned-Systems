@@ -59,29 +59,3 @@ def plot_data(plot_time, actual_depth_data, desired_depth_data, actual_heading_d
     plt.tight_layout()
     plt.savefig('heading_plots.png')
     plt.show()
-
-    #plt.figure(3,figsize=(10,4))
-    # New Smoothed Heading Plot
-    #smoothed_heading_data = smooth_heading_transitions(actual_heading_data)
-    #plt.plot(plot_time, smoothed_heading_data, label='Smoothed Heading')
-    #plt.xlabel('Time (s)')
-    #plt.ylabel('Smoothed Heading (Degrees)')
-    #plt.title('Smoothed Heading Tracking')
-    #plt.legend()
-    #plt.tight_layout()  # Adjust subplots to fit into figure area.
-    #plt.savefig('smoothed_heading_plot.png')
-    #plt.show()
-
-
-#def smooth_heading_transitions(heading_data):
- #   smoothed_data = []
-  #  previous_angle = heading_data[0]
-   # for angle in heading_data:
-    #    delta = angle - previous_angle
-     #   if delta > 180:  # crossed from near 0 to near 360
-      #      angle -= 360
-       # elif delta < -180:  # crossed from near 360 to near 0
-        #    angle += 360
-      #  smoothed_data.append(angle)
-       # previous_angle = angle
-    # return np.array(smoothed_data) + 360 * (np.array(smoothed_data) < 0)  # Ensure all angles are positive

@@ -7,11 +7,11 @@ def update_thrusters(depth_control_signal, heading_control_signal):
     max_thruster_cmd = 1200
     min_thruster_cmd = -1200
     # Calculate thruster commands and clamp them
-    bow_port_command = max(min(depth_control_signal + heading_control_signal, max_thruster_cmd/2.0),
-                           min_thruster_cmd)
-    bow_stbd_command = max(min(depth_control_signal - heading_control_signal, max_thruster_cmd/2.0),
-                           min_thruster_cmd)
-    vert_port_command = max(min(depth_control_signal, max_thruster_cmd), min_thruster_cmd)
+    bow_port_command = max(min(heading_control_signal, max_thruster_cmd/2.0),
+                           min_thruster_cmd/2.0)
+    bow_stbd_command = max(min(heading_control_signal, max_thruster_cmd/2.0),
+                           min_thruster_cmd/2.0)
+    vert_port_command = -max(min(depth_control_signal, max_thruster_cmd), min_thruster_cmd)
     vert_stbd_command = max(min(depth_control_signal, max_thruster_cmd), min_thruster_cmd)
 
     # Returning a dictionary of ROS messages for each thruster
