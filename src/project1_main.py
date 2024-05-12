@@ -70,11 +70,10 @@ def fusion_state_callback(msg):
     body_roll = np.rad2deg(roll)
     body_pitch = np.rad2deg(pitch)
     body_heading = np.rad2deg(yaw)
-    body_x = msg_pose.pose.pose.position.x
+    body_x = msg.pose.pose.pose.position.x
     body_y = msg.pose.pose.pose.position.y
     body_depth = msg.pose.pose.position.z
     fusion_state_sub = np.array([body_x, body_y, body_depth, body_roll, body_pitch, body_heading])
-
 
 # subscriber function
 rospy.Subscriber('/fusion/pose_gt', Odometry, fusion_state_callback, queue_size=desired_rate)
@@ -85,21 +84,71 @@ rospy.sleep(1.0)  # needed so that the callback function can pull the initial st
 rate = rospy.Rate(desired_rate)  # 4 Hz
 dt = 1.0 / desired_rate
 
-# Data for plotting
-plot_time = np.empty((0,))
-actual_depth_data = np.empty((0,))
-actual_heading_data = np.empty((0,))
-depth_error_data = np.empty((0,))
-heading_error_data = np.empty((0,))
-control_signal_data = np.empty((0,))
-heading_control_signal_data = np.empty((0,))
+# Setup plot
+plt.ion()  # Turn on interactive mode
+fig = plt.figure(figsize=(10, 8))
+
+# Top half for navigation
+ax_nav = fig.add_subplot(3, 2, (1,2))
+ax_nav.plot(waypoints[:, 0], waypoints[:, 1], 'ro-', label='Waypoints')
+vehicle_pos, = ax_nav.plot([], [], 'bo', label='Vehicle Position')
+ax_nav.set_xlim([0, 60])
+ax_nav.set_ylim([0, 60])
+ax_nav.set_title('Vehicle Navigation')
+ax_nav.set_xlabel('Y Position (m)')
+ax_nav.set_ylabel('X Position (m)')
+ax_nav.legend()
+
+# Bottom left for Depth
+ax_depth = fig.add_subplot(3, 2, 3)
+line_depth, = ax_depth.plot([], [], 'r-', label='Actual Depth')
+line_depth_desired, = ax_depth.plot([], [], 'b--', label='Desired Depth')
+ax_depth.set_title('Depth Tracking')
+ax_depth.set_xlabel('Time (s)')
+ax_depth.set_ylabel('Depth (m)')
+ax_depth.legend()
+
+ax_depth_error = fig.add_subplot(3, 2, 4)
+line_depth_error, = ax_depth_error.plot([], [], 'g-', label='Depth Error')
+ax_depth_error.axhline(0, color='k', linestyle='--', label='Zero Error')  # Zero error line
+ax_depth_error.set_title('Depth Error')
+ax_depth_error.set_xlabel('Time (s)')
+ax_depth_error.set_ylabel('Error (m)')
+ax_depth_error.legend()
+
+# Bottom right for Heading
+ax_heading = fig.add_subplot(3, 2, 5)
+line_heading, = ax_heading.plot([], [], 'm-', label='Actual Heading')
+line_heading_desired, = ax_heading.plot([], [], 'k--', label='Desired Heading')
+ax_heading.set_title('Heading Tracking')
+ax_heading.set_xlabel('Time (s)')
+ax_heading.set_ylabel('Heading (degrees)')
+ax_heading.legend()
+
+ax_heading_error = fig.add_subplot(3, 2, 6)
+line_heading_error, = ax_heading_error.plot([], [], 'c-', label='Heading Error')
+ax_heading_error.axhline(0, color='r', linestyle='--', label='Zero Error')  # Zero error line
+ax_heading_error.set_title('Heading Error')
+ax_heading_error.set_xlabel('Time (s)')
+ax_heading_error.set_ylabel('Error (degrees)')
+ax_heading_error.legend()
 
 # Main control loop
+plot_time = []
 rho = 5  # look ahead distance
 jj = 1
-start_time = time.time()
+body_depth_data = []
+desired_depth_data = []
+depth_error_data = []
+body_heading_data = []
+desired_heading_data = []
+heading_error_data = []
 try:
     while not rospy.is_shutdown():
+
+        current_time = rospy.get_time()
+        plot_time.append(current_time)
+
         # Get current depth and heading
         body_x = fusion_state_sub[0]
         body_y = fusion_state_sub[1]
@@ -113,47 +162,86 @@ try:
         desired_depth = WAYPOINT_z[jj]
 
         # Calculate depth error
-        depth_error = depth_PID.update(current_depth, desired_depth, dt)
+        depth_PID_output = depth_PID.update(body_depth, desired_depth, dt)  # [0] - depth control signal [1] - error
 
-        if abs(depth_error) >= 0.5:
-            update_thrusters_depth = set_depth(depth_control_signal, stability_thrust)
+        if abs(depth_PID_output[1]) >= 0.5:
+            # call depth control function
+            update_thrusters_depth = set_depth(depth_PID_output[0], stability_thrust)
 
+            # send messages
+            vert_port_thruster_pub.publish(thruster_msgs['vert_port'])
+            vert_stbd_thruster_pub.publish(thruster_msgs['vert_stbd'])
+            bow_port_thruster_pub.publish(thruster_msgs['bow_port'])
+            bow_stbd_thruster_pub.publish(thruster_msgs['bow_stbd'])
+            aft_port_thruster_pub.publish(thruster_msgs['aft_port'])
+            aft_stbd_thruster_pub.publish(thruster_msgs['aft_stbd'])
 
-        # Calculate heading error
-        heading_error = heading_PID.update_angle(current_heading, desired_heading, dt)
+        else:
+            # call heading control function
+            heading_PID_output = update_heading(body_heading, desired_heading, dt)
 
+            # Bailout logic for large errors/turns
+            if abs(heading_PID_output[1]) >= 5:
+                rpm_adjustment = 0.0   # minimizes vehicles surge movement to prioritize heading control
 
-        # Update thrusters
-        thruster_msgs = update_thrusters(depth_error, heading_error)
-        bow_port_thruster_pub.publish(thruster_msgs['bow_port'])
-        bow_stbd_thruster_pub.publish(thruster_msgs['bow_stbd'])
-        vert_port_thruster_pub.publish(thruster_msgs['vert_port'])
-        depth_control_signal, depth_error = depth_PID.update(current_depth, desired_depth, dt)
-        heading_control_signal, heading_error = heading_PID.update(current_heading, desired_heading, dt)
+                # call heading control function
+                update_heading(depth_PID_output[0],heading_PID_output[0], stability_thrust, rpm_adjustment)
 
-        # Update thrusters
-        thruster_msgs = update_thrusters(depth_control_signal, heading_control_signal)
-        bow_port_thruster_pub.publish(thruster_msgs['bow_port'])
-        bow_stbd_thruster_pub.publish(thruster_msgs['bow_stbd'])
-        vert_port_thruster_pub.publish(thruster_msgs['vert_port'])
-        vert_stbd_thruster_pub.publish(thruster_msgs['vert_stbd'])
-        # aftPortThrusterPub.publish(thruster_msgs['aft_port'])
-        # aftStbdThrusterPub.publish(thruster_msgs['aft_stbd'])
-        # aftVertThrusterPub.publish(thruster_msgs['aft_vert'])
+                # send messages
+                vert_port_thruster_pub.publish(thruster_msgs['vert_port'])
+                vert_stbd_thruster_pub.publish(thruster_msgs['vert_stbd'])
+                bow_port_thruster_pub.publish(thruster_msgs['bow_port'])
+                bow_stbd_thruster_pub.publish(thruster_msgs['bow_stbd'])
+                aft_port_thruster_pub.publish(thruster_msgs['aft_port'])
+                aft_stbd_thruster_pub.publish(thruster_msgs['aft_stbd'])
 
-        # Collect data for plotting
-        elapsed_time = current_count
-        plot_time = np.append(plot_time, elapsed_time)
-        actual_depth_data = np.append(actual_depth_data, current_depth)
-        actual_heading_data = np.append(actual_heading_data, current_heading)
-        depth_error_data = np.append(depth_error_data, depth_error)
-        heading_error_data = np.append(heading_error_data, heading_error)
-        control_signal_data = np.append(control_signal_data, depth_control_signal)
-        heading_control_signal_data = np.append(heading_control_signal_data, heading_control_signal)
+            else:
+                rpm_adjustment = 30.0  # prioritizes vehicles surge movement when heading error is below the bailout threshold
+
+                # call heading control function
+                update_heading(depth_PID_output[0], heading_PID_output[0], stability_thrust, rpm_adjustment)
+
+                # send messages
+                vert_port_thruster_pub.publish(thruster_msgs['vert_port'])
+                vert_stbd_thruster_pub.publish(thruster_msgs['vert_stbd'])
+                bow_port_thruster_pub.publish(thruster_msgs['bow_port'])
+                bow_stbd_thruster_pub.publish(thruster_msgs['bow_stbd'])
+                aft_port_thruster_pub.publish(thruster_msgs['aft_port'])
+                aft_stbd_thruster_pub.publish(thruster_msgs['aft_stbd'])
+
+        # Update plotting arrays
+        body_depth_data.append(body_depth)
+        desired_depth_data.append(desired_depth)
+        depth_error_data.append(depth_PID_output[1])
+        body_heading_data.append(body_heading)
+        desired_heading_data.append(desired_heading)
+        heading_error_data.append(heading_PID_output[1])
+
+        # Update plot data
+        vehicle_pos.set_data(body_y, body_x)
+        line_depth.set_data(plot_time, body_depth_data)
+        line_depth_desired.set_data(plot_time, desired_depth_data)
+        line_depth_error.set_data(plot_time, depth_error_data)
+
+        line_heading.set_data(plot_time, body_heading_data)
+        line_heading_desired.set_data(plot_time, desired_heading_data)
+        line_heading_error.set_data(plot_time, heading_error_data)
+
+        # Rescale plot to fit new data
+        ax_depth.relim()
+        ax_depth.autoscale_view()
+        ax_depth_error.relim()
+        ax_depth_error.autoscale_view()
+
+        ax_heading.relim()
+        ax_heading.autoscale_view()
+        ax_heading_error.relim()
+        ax_heading_error.autoscale_view()
+
+        plt.draw()  # Redraw the plots
+        plt.pause(0.1)  # Pause briefly to allow GUI events to process
 
         rate.sleep()
-        current_count += dt
-        print('current_count: {}'.format(current_count))
 except rospy.ROSInterruptException:  # handles ROS shutdown requests Ctrl+C or rosnode kill etc.
     rospy.loginfo("ROS shutdown request received.")
 except Exception as e:  # handles and displays unexpected errors that aren't keyboard interrupts or system exits
@@ -161,22 +249,21 @@ except Exception as e:  # handles and displays unexpected errors that aren't key
 finally:
     # Save and plot final data
     rospy.loginfo("Shutting down, saving data...")
-    # Plotting function call
-    plot_data(plot_time, actual_depth_data, [desired_depth] * len(plot_time), actual_heading_data,
-              [desired_heading] * len(plot_time), depth_error_data, heading_error_data, control_signal_data,
-              heading_control_signal_data)
+    # End plotting
+    plt.ioff()  # Turn off interactive mode
+    plt.show()  # Keep the window open at the end
 
     # Create a filename with ros_rate and PID gains
-    filename = "results__ROSrate{}_KpD{}_KiD{}_KdD{}_KpH{}_KiH{}_KdH{}.npy".format(
+   filename = "results__ROSrate{}_KpD{}_KiD{}_KdD{}_KpH{}_KiH{}_KdH{}.npy".format(
         desired_rate,
         kp_depth, ki_depth, kd_depth,
         kp_heading, ki_heading, kd_heading
     )
     # Save data to numpy binary file for later analysis
-    np.savez(filename, plot_time=plot_time, actual_depth_data=actual_depth_data,
-             desired_depth_data=[desired_depth] * len(plot_time),
-             actual_heading_data=actual_heading_data,
-             desired_heading_data=[desired_heading] * len(plot_time),
-             depth_error_data=depth_error_data,
-             heading_error_data=heading_error_data)
+   np.savez(filename, plot_time=plot_time, body_depth_data=body_depth_data,
+            desired_depth_data=desired_depth_data,
+            body_heading_data=body_heading_data,
+            desired_heading_data= desired_heading_data,
+            depth_error_data=depth_error_data,
+            heading_error_data=heading_error_data)
 

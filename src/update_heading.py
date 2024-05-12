@@ -1,9 +1,7 @@
 from std_msgs.msg import Float64
 
-def update_heading(depth_control_signal, stability_thrust, heading_control_signal, rpm_adjustment,
-                   vert_port_thruster_msg, vert_stbd_thruster_msg,
-                   bow_port_thruster_msg, bow_stbd_thruster_msg,
-                   aft_port_thruster_msg, aft_stbd_thruster_msg, aft_vert_thruster_msg):
+def update_heading(depth_control_signal, heading_control_signal, stability_thrust, rpm_adjustment):
+
     # Define maximum RPM limits
     max_rpm_depth = 400
     heading_control_signal = max(min(heading_control_signal, 25), -25)
