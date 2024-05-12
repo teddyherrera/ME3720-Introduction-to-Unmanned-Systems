@@ -88,6 +88,7 @@ dt = 1.0 / desired_rate
 # Main control loop
 rho = 5  # look ahead distance
 jj = 0
+start_time = rospy.get_time()
 # Initialize empty arrays for each type of data
 data_storage = {
     'plot_time': np.array([], dtype=float),
@@ -103,7 +104,7 @@ data_storage = {
 try:
     while not rospy.is_shutdown():
 
-        current_time = rospy.get_time()
+        current_time = rospy.get_time() - start_time  # normalize time to zero
 
         # Get current depth and heading
         body_x = fusion_state_sub[0]
@@ -165,11 +166,12 @@ try:
 
         # Evaluate if within desired waypoint radius
         # If so, move to next waypoint
-        if np.sqrt((body_x - WAYPOINT_x[jj+1])**2 + (body_y - WAYPOINT_y[jj+1])**2) < 2:
+        current_distance_to_next_waypoint = np.sqrt((body_x - WAYPOINT_x[jj])**2 + (body_y - WAYPOINT_y[jj])**2)
+        if current_distance_to_next_waypoint < 2:
             jj += 1
 
         # Update plotting arrays
-        data_storage['plot_time'] = np.append(data_storage['plot_time'], current_time)
+        data_storage['plot_time'] = np.append(data_storage['plot_time'], current_time - start_time)
         data_storage['body_x_data'] = np.append(data_storage['body_x_data'], body_x)
         data_storage['body_y_data'] = np.append(data_storage['body_y_data'], body_y)
         data_storage['body_depth_data'] = np.append(data_storage['body_depth_data'], body_depth)
