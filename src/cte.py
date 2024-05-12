@@ -1,4 +1,4 @@
-import math
+import numpy as np
 
 def wrap_to_180(angle):
     """Wrap an angle in degrees to [-180, 180]."""
@@ -6,11 +6,11 @@ def wrap_to_180(angle):
 
 def rad_to_deg(angle):
     """Convert radians to degrees."""
-    return angle * (180.0 / math.pi)
+    return angle * (180.0 / np.pi)
 
 def deg_to_rad(angle):
     """Convert degrees to radians."""
-    return angle * (math.pi / 180.0)
+    return angle * (np.pi / 180.0)
 
 def cte(bx, by, fx, fy, tx, ty, rho):
     """
@@ -23,16 +23,16 @@ def cte(bx, by, fx, fy, tx, ty, rho):
         rho: desired approach point (distance in front of vehicle)
     """
     # Normal to the path vector
-    N = [ty - fy, -(tx - fx)]
+    normal = np.array([ty - fy, -(tx - fx)])
     # Position vector from from-point to current position
-    P = [bx - fx, by - fy]
+    position = np.array([bx - fx, by - fy])
     # Error projection on the normal
-    e = (P[0] * N[0] + P[1] * N[1]) / math.sqrt(N[0]**2 + N[1]**2)
+    e = np.dot(normal, position) / np.linalg.norm(normal)
     # Direction to the target point
-    psitrack = math.atan2(ty - fy, tx - fx)
+    psitrack = np.degrees(np.arctan2(ty - fy, tx - fx))
     # Compensated heading
-    psicom = psitrack + math.atan2(e, rho)
+    psicom = psitrack + np.degrees(np.arctan2(e, rho))
     # Convert to degrees and wrap
-    ordered_heading = wrap_to_180(rad_to_deg(psicom))
+    ordered_heading = wrap_to_180(psicom)
 
     return ordered_heading
