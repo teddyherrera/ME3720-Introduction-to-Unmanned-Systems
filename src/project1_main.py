@@ -9,8 +9,7 @@ from tf.transformations import euler_from_quaternion
 import numpy as np
 import matplotlib.pyplot as plt
 from pid_controller import PIDController
-from update_heading import update_heading
-from set_depth import set_depth
+from depth_heading_updater import depth_heading_updater
 from cte import cte
 
 
@@ -128,50 +127,31 @@ try:
         # Returns a tuple with where index [0] is control signal and index [1] is error
         heading_PID_output = heading_PID.update_angle(body_heading, desired_heading, dt)
 
-        if abs(depth_PID_output[1]) >= 0.5:  # if depth error is greater than 0.5 meters, prioritize depth control
-            # call depth function
-            # Returns a dictionary of thruster messages w/ Float 64 data type
-            depth_thruster_msgs = set_depth(depth_PID_output[0], heading_PID_output[0], stability_thrust)
+        # Bailout logic for large errors/turns
+        if abs(heading_PID_output[1]) >= 2:
+            rpm_adjustment = 0.0  # minimizes vehicles surge movement to prioritize heading control
 
-            # send messages
-            vert_port_thruster_pub.publish(depth_thruster_msgs['vert_port'])
-            vert_stbd_thruster_pub.publish(depth_thruster_msgs['vert_stbd'])
-            bow_port_thruster_pub.publish(depth_thruster_msgs['bow_port'])
-            bow_stbd_thruster_pub.publish(depth_thruster_msgs['bow_stbd'])
-            aft_port_thruster_pub.publish(depth_thruster_msgs['aft_port'])
-            aft_stbd_thruster_pub.publish(depth_thruster_msgs['aft_stbd'])
+            # call heading control function
+            # Returns a dictionary of thruster messages w/ Float 64 data type
+            depth_heading_thruster_msgs = depth_heading_updater(depth_PID_output[0], heading_PID_output[0], stability_thrust,
+                                                   rpm_adjustment)
 
         else:  # when depth error is small, prioritize heading control
-            # Bailout logic for large errors/turns
-            if abs(heading_PID_output[1]) >= 5:
-                rpm_adjustment = 0.0   # minimizes vehicles surge movement to prioritize heading control
+            # prioritizes vehicles surge movement when heading error is below bailout threshold
+            rpm_adjustment = 30.0
 
-                # call heading control function
-                # Returns a dictionary of thruster messages w/ Float 64 data type
-                heading_thruster_msgs = update_heading(depth_PID_output[0], heading_PID_output[0], stability_thrust, rpm_adjustment)
+            # call heading control function
+            # Returns a dictionary of thruster messages w/ Float 64 data type
+            depth_heading_thruster_msgs = depth_heading_updater(depth_PID_output[0], heading_PID_output[0], stability_thrust,
+                                                   rpm_adjustment)
 
-                # send messages
-                vert_port_thruster_pub.publish(heading_thruster_msgs['vert_port'])
-                vert_stbd_thruster_pub.publish(heading_thruster_msgs['vert_stbd'])
-                bow_port_thruster_pub.publish(heading_thruster_msgs['bow_port'])
-                bow_stbd_thruster_pub.publish(heading_thruster_msgs['bow_stbd'])
-                aft_port_thruster_pub.publish(heading_thruster_msgs['aft_port'])
-                aft_stbd_thruster_pub.publish(heading_thruster_msgs['aft_stbd'])
-
-            else:
-                rpm_adjustment = 30.0  # prioritizes vehicles surge movement when heading error is below bailout threshold
-
-                # call heading control function
-                # Returns a dictionary of thruster messages w/ Float 64 data type
-                heading_thruster_msgs = update_heading(depth_PID_output[0], heading_PID_output[0], stability_thrust, rpm_adjustment)
-
-                # send messages
-                vert_port_thruster_pub.publish(heading_thruster_msgs['vert_port'])
-                vert_stbd_thruster_pub.publish(heading_thruster_msgs['vert_stbd'])
-                bow_port_thruster_pub.publish(heading_thruster_msgs['bow_port'])
-                bow_stbd_thruster_pub.publish(heading_thruster_msgs['bow_stbd'])
-                aft_port_thruster_pub.publish(heading_thruster_msgs['aft_port'])
-                aft_stbd_thruster_pub.publish(heading_thruster_msgs['aft_stbd'])
+        # send heading prioritized methods
+        vert_port_thruster_pub.publish(depth_heading_thruster_msgs['vert_port'])
+        vert_stbd_thruster_pub.publish(depth_heading_thruster_msgs['vert_stbd'])
+        bow_port_thruster_pub.publish(depth_heading_thruster_msgs['bow_port'])
+        bow_stbd_thruster_pub.publish(depth_heading_thruster_msgs['bow_stbd'])
+        aft_port_thruster_pub.publish(depth_heading_thruster_msgs['aft_port'])
+        aft_stbd_thruster_pub.publish(depth_heading_thruster_msgs['aft_stbd'])
 
         # Evaluate if within desired waypoint radius
         # If so, move to next waypoint
