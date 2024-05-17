@@ -1,4 +1,4 @@
-from std_msgs.msg import Float64
+from uuv_gazebo_ros_plugins_msgs.msg import FloatStamped
 
 
 def depth_heading_updater(depth_control_signal, heading_control_signal, stability_thrust, rpm_adjustment):
@@ -27,10 +27,10 @@ def depth_heading_updater(depth_control_signal, heading_control_signal, stabilit
     aft_stbd_command = stability_thrust - rpm_adjustment
 
     return {
-        'vert_port': Float64(data=vert_port_command),
-        'vert_stbd': Float64(data=vert_stbd_command),
-        'bow_port': Float64(data=bow_port_command),
-        'bow_stbd': Float64(data=bow_stbd_command),
-        'aft_port': Float64(data=aft_port_command),
-        'aft_stbd': Float64(data=aft_stbd_command)
+        'vert_port': FloatStamped(data=vert_port_command),
+        'vert_stbd': FloatStamped(data=vert_stbd_command),
+        'bow_port': FloatStamped(data=bow_port_command),
+        'bow_stbd': FloatStamped(data=bow_stbd_command),
+        'aft_port': FloatStamped(data=aft_port_command),
+        'aft_stbd': FloatStamped(data=aft_stbd_command)
     }

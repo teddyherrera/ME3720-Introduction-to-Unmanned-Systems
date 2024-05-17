@@ -8,7 +8,7 @@ class PIDController:
         self.integral = 0
         self.previous_error = 0
 
-    def update(self, current_value, desired_value, dt):
+    def depth_update(self, current_value, desired_value, dt):
         error = desired_value - current_value
         self.integral += error * dt
         derivative = (error - self.previous_error) / dt
@@ -16,7 +16,7 @@ class PIDController:
         self.previous_error = error
         return output, error
 
-    def update_angle(self, current_angle, desired_angle, dt):
+    def heading_update(self, current_angle, desired_angle, dt):
         # Function to handle angle wrapping and PID control for angles
         unwrapped_error = desired_angle - current_angle
         error = self.wrap_to_180(unwrapped_error)
