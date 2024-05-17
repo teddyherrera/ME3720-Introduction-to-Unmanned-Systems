@@ -3,14 +3,13 @@
 # as a Python script.
 # From ROS wiki
 import rospy
-from std_msgs.msg import Float64
+from uuv_gazebo_ros_plugins_msgs.msg import FloatStamped
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion
 import numpy as np
 import matplotlib.pyplot as plt
 from pid_controller import PIDController
-from update_heading import update_heading
-from set_depth import set_depth
+from depth_heading_updater import depth_heading_updater
 from cte import cte
 
 
@@ -22,7 +21,7 @@ def wrap_to_180(angle):
 
 # Global variables
 desired_rate = 2  # Hz
-kp_depth, ki_depth, kd_depth = 250.0, 12.5, 25.0
+kp_depth, ki_depth, kd_depth = 250.0, 4, 10.0
 kp_heading, ki_heading, kd_heading = 1.0, 0.2, 0.8
 stability_thrust = 500.0  # provides bow and aft port/stbd thrusters with a baseline thrust to stabilize rotation
 body_x = None
@@ -37,13 +36,14 @@ depth_PID = PIDController(kp_depth, ki_depth, kd_depth)
 heading_PID = PIDController(kp_heading, ki_heading, kd_heading)
 
 # Define waypoints
-waypoint1 = np.array([25.0, 25.0, -10.0])
-waypoint2 = np.array([50.0, 25.0, -10.0])
-waypoint3 = np.array([50.0, 50.0, -10.0])
-waypoint4 = np.array([25.0, 50.0, -10.0])
+waypoint1 = np.array([0.0, 0.0, -10.0])
+waypoint2 = np.array([25.0, 25.0, -10.0])
+waypoint3 = np.array([50.0, 25.0, -15.0])
+waypoint4 = np.array([50.0, 50.0, -20.0])
+waypoint5 = np.array([25.0, 50.0, -15.0])
 
 # Create a numpy array of waypoints
-WAYPOINTS = np.array([waypoint1, waypoint2, waypoint3, waypoint4, waypoint1])
+WAYPOINTS = np.array([waypoint1, waypoint2, waypoint3, waypoint4, waypoint5, waypoint2])
 
 # Accessing separate arrays for x, y, z coordinates
 WAYPOINT_x = WAYPOINTS[:, 0]
@@ -57,18 +57,18 @@ rospy.init_node('Project1_main', anonymous=True)
 
 # create the publisher object
 # documentation for rospy.Publisher: http://wiki.ros.org/rospy/Overview/Publishers%20and%20Subscribers
-bow_port_thruster_pub = rospy.Publisher('/bow_port_thruster', Float64, queue_size=desired_rate)
-bow_stbd_thruster_pub = rospy.Publisher('/bow_stbd_thruster', Float64, queue_size=desired_rate)
-vert_port_thruster_pub = rospy.Publisher('/vert_port_thruster', Float64, queue_size=desired_rate)
-vert_stbd_thruster_pub = rospy.Publisher('/vert_stbd_thruster', Float64, queue_size=desired_rate)
-aft_port_thruster_pub = rospy.Publisher('/aft_port_thruster', Float64, queue_size=desired_rate)
-aft_stbd_thruster_pub = rospy.Publisher('/aft_stbd_thruster', Float64, queue_size=desired_rate)
-aft_vert_thruster_pub = rospy.Publisher('/aft_vert_thruster', Float64, queue_size=desired_rate)
+bow_port_thruster_pub = rospy.Publisher('/fusion/thrusters/3/input', FloatStamped, queue_size=desired_rate)
+bow_stbd_thruster_pub = rospy.Publisher('/fusion/thrusters/0/input', FloatStamped, queue_size=desired_rate)
+vert_port_thruster_pub = rospy.Publisher('/fusion/thrusters/4/input', FloatStamped, queue_size=desired_rate)
+vert_stbd_thruster_pub = rospy.Publisher('/fusion/thrusters/1/input', FloatStamped, queue_size=desired_rate)
+aft_port_thruster_pub = rospy.Publisher('/fusion/thrusters/5/input', FloatStamped, queue_size=desired_rate)
+aft_stbd_thruster_pub = rospy.Publisher('/fusion/thrusters/2/input', FloatStamped, queue_size=desired_rate)
+aft_vert_thruster_pub = rospy.Publisher('/fusion/thrusters/6/input', FloatStamped, queue_size=desired_rate)
 
 
 # build callback function
 def fusion_state_callback(msg):
-    global body_x, body_y, body_depth, body_roll, body_pitch, body_heading, fusion_state_sub
+    global body_x, body_y, body_depth, body_roll, body_pitch, body_heading
     # Convert quaternion to Euler angles to get heading
     quat = np.array([msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z,
                     msg.pose.pose.orientation.w])
@@ -118,60 +118,41 @@ try:
         desired_heading = cte(body_x, body_y, WAYPOINT_x[jj], WAYPOINT_y[jj], WAYPOINT_x[jj+1], WAYPOINT_y[jj+1], rho)
 
         # Set desired depth to the current waypoint z value
-        desired_depth = WAYPOINT_z[jj]
+        desired_depth = WAYPOINT_z[jj+1]
 
         # Call depth control function
         # Pass in body_depth, desired_depth, and dt
         # Returns a tuple with where index [0] is control signal and index [1] is error
-        depth_PID_output = depth_PID.update(body_depth, desired_depth, dt)
+        depth_PID_output = depth_PID.depth_update(body_depth, desired_depth, dt)
         # call heading control function
         # Returns a tuple with where index [0] is control signal and index [1] is error
-        heading_PID_output = heading_PID.update_angle(body_heading, desired_heading, dt)
+        heading_PID_output = heading_PID.heading_update(body_heading, desired_heading, dt)
 
-        if abs(depth_PID_output[1]) >= 0.5:  # if depth error is greater than 0.5 meters, prioritize depth control
-            # call depth function
+        # Bailout logic for large errors/turns
+        if abs(heading_PID_output[1]) >= 2:
+            rpm_adjustment = 0.0  # minimizes vehicles surge movement to prioritize heading control
+
+            # call heading control function
             # Returns a dictionary of thruster messages w/ Float 64 data type
-            depth_thruster_msgs = set_depth(depth_PID_output[0], heading_PID_output[0], stability_thrust)
-
-            # send messages
-            vert_port_thruster_pub.publish(depth_thruster_msgs['vert_port'])
-            vert_stbd_thruster_pub.publish(depth_thruster_msgs['vert_stbd'])
-            bow_port_thruster_pub.publish(depth_thruster_msgs['bow_port'])
-            bow_stbd_thruster_pub.publish(depth_thruster_msgs['bow_stbd'])
-            aft_port_thruster_pub.publish(depth_thruster_msgs['aft_port'])
-            aft_stbd_thruster_pub.publish(depth_thruster_msgs['aft_stbd'])
+            depth_heading_thruster_msgs = depth_heading_updater(depth_PID_output[0], heading_PID_output[0],
+                                                                stability_thrust, rpm_adjustment)
 
         else:  # when depth error is small, prioritize heading control
-            # Bailout logic for large errors/turns
-            if abs(heading_PID_output[1]) >= 5:
-                rpm_adjustment = 0.0   # minimizes vehicles surge movement to prioritize heading control
+            # prioritizes vehicles surge movement when heading error is below bailout threshold
+            rpm_adjustment = 30.0
 
-                # call heading control function
-                # Returns a dictionary of thruster messages w/ Float 64 data type
-                heading_thruster_msgs = update_heading(depth_PID_output[0], heading_PID_output[0], stability_thrust, rpm_adjustment)
+            # call heading control function
+            # Returns a dictionary of thruster messages w/ Float 64 data type
+            depth_heading_thruster_msgs = depth_heading_updater(depth_PID_output[0], heading_PID_output[0], stability_thrust,
+                                                                rpm_adjustment)
 
-                # send messages
-                vert_port_thruster_pub.publish(heading_thruster_msgs['vert_port'])
-                vert_stbd_thruster_pub.publish(heading_thruster_msgs['vert_stbd'])
-                bow_port_thruster_pub.publish(heading_thruster_msgs['bow_port'])
-                bow_stbd_thruster_pub.publish(heading_thruster_msgs['bow_stbd'])
-                aft_port_thruster_pub.publish(heading_thruster_msgs['aft_port'])
-                aft_stbd_thruster_pub.publish(heading_thruster_msgs['aft_stbd'])
-
-            else:
-                rpm_adjustment = 30.0  # prioritizes vehicles surge movement when heading error is below bailout threshold
-
-                # call heading control function
-                # Returns a dictionary of thruster messages w/ Float 64 data type
-                heading_thruster_msgs = update_heading(depth_PID_output[0], heading_PID_output[0], stability_thrust, rpm_adjustment)
-
-                # send messages
-                vert_port_thruster_pub.publish(heading_thruster_msgs['vert_port'])
-                vert_stbd_thruster_pub.publish(heading_thruster_msgs['vert_stbd'])
-                bow_port_thruster_pub.publish(heading_thruster_msgs['bow_port'])
-                bow_stbd_thruster_pub.publish(heading_thruster_msgs['bow_stbd'])
-                aft_port_thruster_pub.publish(heading_thruster_msgs['aft_port'])
-                aft_stbd_thruster_pub.publish(heading_thruster_msgs['aft_stbd'])
+        # send heading prioritized methods
+        vert_port_thruster_pub.publish(depth_heading_thruster_msgs['vert_port'])
+        vert_stbd_thruster_pub.publish(depth_heading_thruster_msgs['vert_stbd'])
+        bow_port_thruster_pub.publish(depth_heading_thruster_msgs['bow_port'])
+        bow_stbd_thruster_pub.publish(depth_heading_thruster_msgs['bow_stbd'])
+        aft_port_thruster_pub.publish(depth_heading_thruster_msgs['aft_port'])
+        aft_stbd_thruster_pub.publish(depth_heading_thruster_msgs['aft_stbd'])
 
         # Evaluate if within desired waypoint radius
         # If so, move to next waypoint
